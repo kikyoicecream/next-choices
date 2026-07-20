@@ -20,6 +20,8 @@
     const DEFAULT_PROMPT_TEMPLATE =
         'You are an assistant helping a roleplay player. Below is the recent conversation between {{user}} and {{char}}:\n\n' +
         '{{history}}\n\n' +
+        'Persona of {{user}} (match their voice, writing style, and inner narration):\n' +
+        '{{persona}}\n\n' +
         'Write {{numChoices}} response options that {{user}} could say next, replying to the latest message from {{char}}.\n\n' +
         'Requirements:\n' +
         '- The motivation behind each option, and the consequences it would lead to, must differ drastically from the other options (e.g. one bold, one cautious, one creative).\n' +
@@ -114,14 +116,41 @@
         return null;
     }
 
+    /**
+     * Returns the player's persona description, or '' if none is set.
+     */
+    function getPersonaDescription(ctx) {
+        const desc = ctx?.powerUserSettings?.persona_description;
+        return typeof desc === 'string' ? desc.trim() : '';
+    }
+
     function buildPrompt(ctx, settings) {
         const history = buildHistory(ctx, settings.historyDepth);
         const template = settings.promptTemplate || DEFAULT_PROMPT_TEMPLATE;
-        return template
-            .replaceAll('{{history}}', history)
+
+        let prompt = template.replaceAll('{{numChoices}}', String(settings.numChoices));
+
+        // Let SillyTavern expand its own macros ({{user}}, {{char}}, {{persona}},
+        // {{description}}, ...). Macros ST does not know, such as {{history}},
+        // pass through untouched.
+        if (typeof ctx?.substituteParams === 'function') {
+            try {
+                prompt = ctx.substituteParams(prompt);
+            } catch (err) {
+                console.warn(`[${MODULE_NAME}] substituteParams failed, using manual macro replacement:`, err);
+            }
+        }
+
+        // Manual fallback for older ST versions without substituteParams;
+        // no-ops when the macros were already expanded above.
+        prompt = prompt
             .replaceAll('{{user}}', ctx?.name1 ?? 'User')
             .replaceAll('{{char}}', ctx?.name2 ?? 'Assistant')
-            .replaceAll('{{numChoices}}', String(settings.numChoices));
+            .replaceAll('{{persona}}', getPersonaDescription(ctx));
+
+        // History goes in last so macro-like text inside chat messages is
+        // never expanded as a macro.
+        return prompt.replaceAll('{{history}}', history);
     }
 
     // =========================================================================
